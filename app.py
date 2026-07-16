@@ -8,7 +8,7 @@ from duckduckgo_search import DDGS  # Free Web Search Library
 
 # Start with the sidebar EXPANDED by default!
 st.set_page_config(
-    page_title="Rival Chatbot", 
+    page_title="SpaceHelix AI", 
     page_icon="💬", 
     initial_sidebar_state="expanded"
 )
