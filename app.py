@@ -4,7 +4,7 @@ import base64
 import urllib.parse
 import urllib.request
 import re
-from duckduckgo_search import DDGS  # New Free Web Search Library
+from duckduckgo_search import DDGS  # Free Web Search Library
 
 # Start with the sidebar EXPANDED by default!
 st.set_page_config(
@@ -19,6 +19,7 @@ def get_base64_of_bin_file(bin_file):
         data = f.read()
     return base64.b64encode(data).decode()
 
+# --- NEW: HARDER TINT CSS FOR EASY READING ---
 try:
     bin_str = get_base64_of_bin_file('background.png')
     page_bg_img = f'''
@@ -30,10 +31,15 @@ try:
         background-repeat: no-repeat;
         background-attachment: fixed;
     }}
+    /* Hardened chat bubbles: Dark slate with 85% opacity & crisp white text */
     .stChatMessage {{
-        background-color: rgba(255, 255, 255, 0.08) !important;
-        backdrop-filter: blur(10px);
-        border-radius: 10px;
+        background-color: rgba(15, 15, 25, 0.85) !important;
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 10px;
+        color: #f0f0f5 !important;
     }}
     </style>
     '''
@@ -43,6 +49,16 @@ except FileNotFoundError:
     <style>
     .stApp {
         background: linear-gradient(135deg, #1e1e2f, #111119);
+    }
+    /* Hardened fallback bubbles if background image is missing */
+    .stChatMessage {
+        background-color: rgba(25, 25, 35, 0.85) !important;
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 10px;
+        color: #f0f0f5 !important;
     }
     </style>
     '''
@@ -226,11 +242,10 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     response_placeholder.error(f"Failed to find video. Error: {e}")
                 
             else:
-                # Standard Text Chat with Live DuckDuckGo Web Search Integration!
+                # Standard Text Chat with Live DuckDuckGo Web Search Integration
                 try:
                     response_placeholder.info("Searching the live web for facts... 🌐")
                     
-                    # 1. Query DuckDuckGo for context
                     web_context = ""
                     try:
                         with DDGS() as ddgs:
@@ -239,10 +254,8 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                                 for r in search_results:
                                     web_context += f"Source URL: {r.get('href')}\nTitle: {r.get('title')}\nSnippet: {r.get('body')}\n\n"
                     except Exception as search_err:
-                        # Fallback silently if search fails and proceed without web context
                         web_context = ""
                     
-                    # 2. Build system instructions with the live search context injected
                     system_prompt = (
                         "You are a helpful, extremely fast, and highly accurate assistant. "
                         "You have access to live web results to answer the user's prompt. "
@@ -255,7 +268,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     else:
                         system_prompt += "\nNo live web search results were found, answer to the best of your general knowledge."
 
-                    # Clean history so Groq api doesn't crash on custom image/video keys
+                    # Clean history
                     clean_messages = []
                     for msg in current_messages:
                         clean_messages.append({
@@ -269,7 +282,6 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     
                     response_placeholder.empty()
                     
-                    # 3. Request completion with streamed response
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=messages_with_system,
