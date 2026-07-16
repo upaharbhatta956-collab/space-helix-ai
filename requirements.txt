@@ -1,4 +1,4 @@
 streamlit
 groq
-youtube-search-python
 duckduckgo-search
+requests
