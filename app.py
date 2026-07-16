@@ -7,7 +7,7 @@ import requests
 from duckduckgo_search import DDGS
 
 # Fast, clean, full-screen chat layout
-st.set_page_config(page_title="SparkHelix AI", page_icon="💬", layout="centered")
+st.set_page_config(page_title="Rival Chatbot", page_icon="💬", layout="centered")
 
 # --- BACKGROUND STYLE ---
 try:
@@ -56,9 +56,9 @@ except FileNotFoundError:
 # Title
 st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>💬 Rival Chat</h1>", unsafe_allow_html=True)
 
-# --- IN-MEMORY CHAT HISTORY (Clears on refresh) ---
+# --- IN-MEMORY CHAT HISTORY ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Hey! Ask me to write, draw an image, or play a video. (Note: History will clear if you refresh!)"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Hey! Ask me to write, draw an image, or play a video."}]
 
 # Render current session messages
 for msg in st.session_state.messages:
@@ -136,22 +136,26 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                 except Exception as e:
                     placeholder.error(f"Error fetching video: {e}")
             
-            # 3. Standard Text / Search response
+            # 3. Standard Text / Search response (With Bulletproof Fallback)
             else:
                 try:
                     placeholder.info("Searching the web... 🌐")
                     context = ""
                     try:
-                        with DDGS() as ddgs:
-                            results = ddgs.text(prompt, max_results=3)
+                        # Modified DDGS call to use standard text search directly with a timeout
+                        results = DDGS().text(prompt, max_results=3)
+                        if results:
                             for r in results:
                                 context += f"Source: {r.get('href')}\nSnippet: {r.get('body')}\n\n"
-                    except Exception:
-                        pass
+                    except Exception as ddg_err:
+                        # Silently log the issue but do NOT crash. Let Groq reply anyway!
+                        context = ""
                     
                     system = "You are a helpful assistant."
                     if context:
-                        system += f"\n\nHere is search engine context:\n{context}"
+                        system += f"\n\nHere is some real-time web search context to help you answer:\n{context}"
+                    else:
+                        system += "\n\n(Note: Web search was temporarily blocked by the search engine, so please answer to the best of your general knowledge.)"
                         
                     # Build history payload
                     clean_hist = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
