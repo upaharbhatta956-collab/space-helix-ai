@@ -2,7 +2,8 @@ import streamlit as st
 from groq import Groq
 import base64
 import urllib.parse
-import requests  # Built-in python requests
+import urllib.request
+import re
 
 # Start with the sidebar EXPANDED by default!
 st.set_page_config(
@@ -176,7 +177,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                 st.rerun()
                 
             elif is_video_request:
-                response_placeholder.info("Searching YouTube... 🔍")
+                response_placeholder.info("Searching YouTube directly... 🔍")
                 
                 search_query = prompt
                 for kw in video_keywords:
@@ -187,32 +188,38 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     search_query = "never gonna give you up rick astley"
                 
                 try:
-                    # Direct fetch to an open Invidious search API
-                    api_url = f"https://vid.puffyan.us/api/v1/search?q={urllib.parse.quote(search_query)}"
-                    res = requests.get(api_url, timeout=10).json()
+                    # 1. Query YouTube's search page directly
+                    encoded_search = urllib.parse.quote(search_query)
+                    url = f"https://www.youtube.com/results?search_query={encoded_search}"
                     
-                    # Filter for only video type results
-                    videos = [item for item in res if item.get("type") == "video"]
+                    # Pretend to be a normal web browser so YouTube doesn't block us
+                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                    req = urllib.request.Request(url, headers=headers)
                     
-                    if videos:
-                        video_data = videos[0]
-                        video_id = video_data['videoId']
-                        video_title = video_data['title']
+                    with urllib.request.urlopen(req) as response:
+                        html = response.read().decode()
+                        
+                    # 2. Use a regular expression to find the first video ID on the page
+                    video_ids = re.findall(r"watch\?v=(\S{{11}})", html)
+                    
+                    if video_ids:
+                        video_id = video_ids[0]
                         video_url = f"https://www.youtube.com/watch?v={video_id}"
                         
                         response_placeholder.empty()
+                        # Embed the actual player!
                         st.video(video_url)
                         
                         current_messages.append({
                             "role": "assistant",
-                            "content": f"Now playing: **{video_title}** 🎥",
+                            "content": f"Found a video for: **{search_query}** 🎥",
                             "video_url": video_url
                         })
                         st.rerun()
                     else:
-                        response_placeholder.error("I couldn't find any videos for that search.")
+                        response_placeholder.error("Couldn't find any videos for that search on YouTube.")
                 except Exception as e:
-                    response_placeholder.error(f"YouTube search failed. Try phrasing it a different way!")
+                    response_placeholder.error(f"Failed to find video. Error: {e}")
                 
             else:
                 # Standard Text Chat Logic with Groq
