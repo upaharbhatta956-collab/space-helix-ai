@@ -2,6 +2,7 @@ import streamlit as st
 from groq import Groq
 import base64
 import urllib.parse
+from youtubesearchpython import VideosSearch  # New YouTube Search Library
 
 # Start with the sidebar EXPANDED by default!
 st.set_page_config(
@@ -51,7 +52,7 @@ client = Groq()
 # --- CHAT HISTORY STORAGE ---
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = {
-        "Chat 1": [{"role": "assistant", "content": "Ready to go. Ask me to generate an image or just chat!"}]
+        "Chat 1": [{"role": "assistant", "content": "Ready to go. Ask me to generate an image, play a YouTube video, or just chat!"}]
     }
 
 if "active_chat" not in st.session_state:
@@ -61,7 +62,6 @@ if "active_chat" not in st.session_state:
 with st.sidebar:
     st.title("💬 Chat History")
     
-    # Button to start a brand-new chat session
     if st.button("➕ New Chat", use_container_width=True):
         new_chat_num = len(st.session_state.all_chats) + 1
         new_chat_name = f"Chat {new_chat_num}"
@@ -71,7 +71,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # RENAME INPUT
     st.write("### ✏️ Rename Active Chat")
     new_title = st.text_input(
         "Type a new name and hit Enter:", 
@@ -87,17 +86,13 @@ with st.sidebar:
     st.markdown("---")
     st.write("### Previous Conversations:")
     
-    # List all saved chats as clickable buttons
     for chat_name in list(st.session_state.all_chats.keys()):
         label = f"✨ {chat_name}" if chat_name == st.session_state.active_chat else f"📁 {chat_name}"
-        
         if st.button(label, key=f"btn_{chat_name}", use_container_width=True):
             st.session_state.active_chat = chat_name
             st.rerun()
             
     st.markdown("---")
-    
-    # EXPORTER
     st.write("### 💾 Export Chat")
     
     chat_export_text = ""
@@ -105,7 +100,9 @@ with st.sidebar:
         role_label = "Bot" if msg["role"] == "assistant" else "You"
         chat_export_text += f"[{role_label}]: {msg['content']}\n"
         if "image_url" in msg:
-            chat_export_text += f"[Generated Image URL]: {msg['image_url']}\n"
+            chat_export_text += f"[Generated Image]: {msg['image_url']}\n"
+        if "video_url" in msg:
+            chat_export_text += f"[YouTube Video Embedded]: {msg['video_url']}\n"
         chat_export_text += "-"*40 + "\n"
         
     st.download_button(
@@ -117,7 +114,6 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    
     if st.button("🧹 Wipe All History", use_container_width=True):
         st.session_state.all_chats = {"Chat 1": [{"role": "assistant", "content": "All history wiped. Fresh start!"}]}
         st.session_state.active_chat = "Chat 1"
@@ -132,9 +128,11 @@ for msg in current_messages:
         st.write(msg["content"])
         if "image_url" in msg:
             st.image(msg["image_url"], caption="Generated Image ✨", use_container_width=True)
+        if "video_url" in msg:
+            st.video(msg["video_url"])
 
 # Watch for user input
-if prompt := st.chat_input("Talk or ask for an image..."):
+if prompt := st.chat_input("Talk, draw, or play a video..."):
     prompt = prompt.strip()
     if prompt:
         current_messages.append({"role": "user", "content": prompt})
@@ -145,8 +143,13 @@ if prompt := st.chat_input("Talk or ask for an image..."):
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             
+            # 1. CHECK FOR IMAGE REQUESTS
             image_keywords = ["generate image", "draw", "generate an image", "create an image of", "paint", "make a picture of"]
             is_image_request = any(keyword in prompt.lower() for keyword in image_keywords)
+            
+            # 2. CHECK FOR YOUTUBE REQUESTS
+            video_keywords = ["play", "watch", "youtube", "listen to", "search youtube for"]
+            is_video_request = any(keyword in prompt.lower() for keyword in video_keywords)
             
             if is_image_request:
                 response_placeholder.info("Generating your masterpiece... 🎨")
@@ -165,22 +168,59 @@ if prompt := st.chat_input("Talk or ask for an image..."):
                 response_placeholder.empty()
                 st.image(image_url, caption=f'"{image_prompt}"', use_container_width=True)
                 
-                text_response = f"Here is the image I generated for: '{image_prompt}'"
                 current_messages.append({
                     "role": "assistant", 
-                    "content": text_response,
+                    "content": f"Here is the image I generated for: '{image_prompt}'",
                     "image_url": image_url
                 })
                 st.rerun()
                 
+            elif is_video_request:
+                response_placeholder.info("Searching YouTube... 🔍")
+                
+                # Extract the search query
+                search_query = prompt
+                for kw in video_keywords:
+                    search_query = search_query.replace(kw, "")
+                search_query = search_query.strip()
+                
+                if not search_query:
+                    search_query = "never gonna give you up rick astley"
+                
+                try:
+                    # Search YouTube behind the scenes
+                    videos_search = VideosSearch(search_query, limit=1)
+                    results = videos_search.result()
+                    
+                    if results and results['result']:
+                        video_data = results['result'][0]
+                        video_url = video_data['link']
+                        video_title = video_data['title']
+                        
+                        response_placeholder.empty()
+                        # Embed the actual player!
+                        st.video(video_url)
+                        
+                        current_messages.append({
+                            "role": "assistant",
+                            "content": f"Now playing: **{video_title}** 🎥",
+                            "video_url": video_url
+                        })
+                        st.rerun()
+                    else:
+                        response_placeholder.error("I couldn't find any videos for that search.")
+                except Exception as e:
+                    response_placeholder.error(f"Failed to search YouTube: {e}")
+                
             else:
+                # Standard Text Chat Logic with Groq
                 try:
                     messages_with_system = [
-                        {"role": "system", "content": "You are a helpful assistant. If the user wants an image, they can use words like 'draw' or 'generate image' to trigger your image generation tool."}
+                        {"role": "system", "content": "You are a helpful assistant. If the user wants to play a video or watch something, tell them you can search YouTube and play it for them!"}
                     ] + current_messages
                     
                     completion = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",  # Updated to the ultra-reliable model!
+                        model="llama-3.3-70b-versatile",
                         messages=messages_with_system,
                         stream=True,
                     )
