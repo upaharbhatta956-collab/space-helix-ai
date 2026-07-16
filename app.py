@@ -49,13 +49,11 @@ except FileNotFoundError:
 client = Groq()
 
 # --- CHAT HISTORY STORAGE ---
-# 'all_chats' stores previous sessions: { "Chat Name": [messages] }
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = {
         "Chat 1": [{"role": "assistant", "content": "Ready to go. Ask me to generate an image or just chat!"}]
     }
 
-# 'active_chat' tracks which chat name we are currently looking at
 if "active_chat" not in st.session_state:
     st.session_state.active_chat = "Chat 1"
 
@@ -73,18 +71,15 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # 1. NEW: CUSTOM CHAT RENAME INPUT
+    # RENAME INPUT
     st.write("### ✏️ Rename Active Chat")
-    # Text input initialized with the current active chat's name
     new_title = st.text_input(
         "Type a new name and hit Enter:", 
         value=st.session_state.active_chat,
         key="rename_input"
     ).strip()
     
-    # If the user changed the text and it's not empty, rename it in memory!
     if new_title and new_title != st.session_state.active_chat:
-        # Transfer the messages to the new key name
         st.session_state.all_chats[new_title] = st.session_state.all_chats.pop(st.session_state.active_chat)
         st.session_state.active_chat = new_title
         st.rerun()
@@ -94,7 +89,6 @@ with st.sidebar:
     
     # List all saved chats as clickable buttons
     for chat_name in list(st.session_state.all_chats.keys()):
-        # Highlight the current active chat
         label = f"✨ {chat_name}" if chat_name == st.session_state.active_chat else f"📁 {chat_name}"
         
         if st.button(label, key=f"btn_{chat_name}", use_container_width=True):
@@ -103,10 +97,9 @@ with st.sidebar:
             
     st.markdown("---")
     
-    # 2. NEW: CODE & CHAT EXPORTER BUTTON
+    # EXPORTER
     st.write("### 💾 Export Chat")
     
-    # Compile all current messages into a single text format
     chat_export_text = ""
     for msg in st.session_state.all_chats[st.session_state.active_chat]:
         role_label = "Bot" if msg["role"] == "assistant" else "You"
@@ -115,7 +108,6 @@ with st.sidebar:
             chat_export_text += f"[Generated Image URL]: {msg['image_url']}\n"
         chat_export_text += "-"*40 + "\n"
         
-    # Standard Streamlit download button
     st.download_button(
         label="📥 Download This Chat (.txt)",
         data=chat_export_text,
@@ -126,7 +118,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Danger zone button to wipe everything
     if st.button("🧹 Wipe All History", use_container_width=True):
         st.session_state.all_chats = {"Chat 1": [{"role": "assistant", "content": "All history wiped. Fresh start!"}]}
         st.session_state.active_chat = "Chat 1"
@@ -135,7 +126,7 @@ with st.sidebar:
 # --- LOAD CURRENT ACTIVE CHAT MESSAGES ---
 current_messages = st.session_state.all_chats[st.session_state.active_chat]
 
-# Render messages from the active session
+# Render messages
 for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
@@ -146,12 +137,11 @@ for msg in current_messages:
 if prompt := st.chat_input("Talk or ask for an image..."):
     prompt = prompt.strip()
     if prompt:
-        # Save user message to active history
         current_messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
 
-        # Get response from Assistant
+        # Get response
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             
@@ -190,7 +180,7 @@ if prompt := st.chat_input("Talk or ask for an image..."):
                     ] + current_messages
                     
                     completion = client.chat.completions.create(
-                        model="llama-3.3-70b-specdec",
+                        model="llama-3.3-70b-versatile",  # Updated to the ultra-reliable model!
                         messages=messages_with_system,
                         stream=True,
                     )
