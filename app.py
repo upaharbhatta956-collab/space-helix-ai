@@ -188,11 +188,10 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     search_query = "never gonna give you up"
                 
                 try:
-                    # 1. Query YouTube's search page directly
+                    # Query YouTube directly
                     encoded_search = urllib.parse.quote(search_query)
                     url = f"https://www.youtube.com/results?search_query={encoded_search}"
                     
-                    # Spoof user-agent to look like a modern browser
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                         'Accept-Language': 'en-US,en;q=0.9'
@@ -202,21 +201,18 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     with urllib.request.urlopen(req) as response:
                         html = response.read().decode('utf-8', errors='ignore')
                         
-                    # 2. Extract video IDs directly from YouTube's embedded JSON payload
+                    # Extract video IDs
                     video_ids = re.findall(r'"videoId":"([^"]{11})"', html)
                     
-                    # Fallback pattern if JSON structural format changes slightly
                     if not video_ids:
                         video_ids = re.findall(r'/watch\?v=([a-zA-Z0-9_-]{11})', html)
                     
                     if video_ids:
-                        # Grab the first unique result to avoid duplicates
                         unique_ids = list(dict.fromkeys(video_ids))
                         video_id = unique_ids[0]
                         video_url = f"https://www.youtube.com/watch?v={video_id}"
                         
                         response_placeholder.empty()
-                        # Embed the actual player!
                         st.video(video_url)
                         
                         current_messages.append({
@@ -233,9 +229,17 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
             else:
                 # Standard Text Chat Logic with Groq
                 try:
+                    # CRITICAL FIX: Clean the messages so Groq doesn't see 'video_url' or 'image_url' keys!
+                    clean_messages = []
+                    for msg in current_messages:
+                        clean_messages.append({
+                            "role": msg["role"],
+                            "content": msg["content"]
+                        })
+
                     messages_with_system = [
                         {"role": "system", "content": "You are a helpful assistant. If the user wants to play a video or watch something, tell them you can search YouTube and play it for them!"}
-                    ] + current_messages
+                    ] + clean_messages
                     
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
