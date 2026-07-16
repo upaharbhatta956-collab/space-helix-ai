@@ -185,25 +185,34 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                 search_query = search_query.strip()
                 
                 if not search_query:
-                    search_query = "never gonna give you up rick astley"
+                    search_query = "never gonna give you up"
                 
                 try:
                     # 1. Query YouTube's search page directly
                     encoded_search = urllib.parse.quote(search_query)
                     url = f"https://www.youtube.com/results?search_query={encoded_search}"
                     
-                    # Pretend to be a normal web browser so YouTube doesn't block us
-                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                    # Spoof user-agent to look like a modern browser
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
                     req = urllib.request.Request(url, headers=headers)
                     
                     with urllib.request.urlopen(req) as response:
-                        html = response.read().decode()
+                        html = response.read().decode('utf-8', errors='ignore')
                         
-                    # 2. Use a regular expression to find the first video ID on the page
-                    video_ids = re.findall(r"watch\?v=(\S{{11}})", html)
+                    # 2. Extract video IDs directly from YouTube's embedded JSON payload
+                    video_ids = re.findall(r'"videoId":"([^"]{11})"', html)
+                    
+                    # Fallback pattern if JSON structural format changes slightly
+                    if not video_ids:
+                        video_ids = re.findall(r'/watch\?v=([a-zA-Z0-9_-]{11})', html)
                     
                     if video_ids:
-                        video_id = video_ids[0]
+                        # Grab the first unique result to avoid duplicates
+                        unique_ids = list(dict.fromkeys(video_ids))
+                        video_id = unique_ids[0]
                         video_url = f"https://www.youtube.com/watch?v={video_id}"
                         
                         response_placeholder.empty()
@@ -217,7 +226,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                         })
                         st.rerun()
                     else:
-                        response_placeholder.error("Couldn't find any videos for that search on YouTube.")
+                        response_placeholder.error("Couldn't find any videos for that search. Try phrasing it differently!")
                 except Exception as e:
                     response_placeholder.error(f"Failed to find video. Error: {e}")
                 
