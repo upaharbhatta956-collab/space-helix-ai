@@ -2,7 +2,7 @@ import streamlit as st
 from groq import Groq
 import base64
 import urllib.parse
-from youtubesearchpython import VideosSearch  # New YouTube Search Library
+import requests  # Built-in python requests
 
 # Start with the sidebar EXPANDED by default!
 st.set_page_config(
@@ -178,7 +178,6 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
             elif is_video_request:
                 response_placeholder.info("Searching YouTube... 🔍")
                 
-                # Extract the search query
                 search_query = prompt
                 for kw in video_keywords:
                     search_query = search_query.replace(kw, "")
@@ -188,17 +187,20 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     search_query = "never gonna give you up rick astley"
                 
                 try:
-                    # Search YouTube behind the scenes
-                    videos_search = VideosSearch(search_query, limit=1)
-                    results = videos_search.result()
+                    # Direct fetch to an open Invidious search API
+                    api_url = f"https://vid.puffyan.us/api/v1/search?q={urllib.parse.quote(search_query)}"
+                    res = requests.get(api_url, timeout=10).json()
                     
-                    if results and results['result']:
-                        video_data = results['result'][0]
-                        video_url = video_data['link']
+                    # Filter for only video type results
+                    videos = [item for item in res if item.get("type") == "video"]
+                    
+                    if videos:
+                        video_data = videos[0]
+                        video_id = video_data['videoId']
                         video_title = video_data['title']
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
                         
                         response_placeholder.empty()
-                        # Embed the actual player!
                         st.video(video_url)
                         
                         current_messages.append({
@@ -210,7 +212,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     else:
                         response_placeholder.error("I couldn't find any videos for that search.")
                 except Exception as e:
-                    response_placeholder.error(f"Failed to search YouTube: {e}")
+                    response_placeholder.error(f"YouTube search failed. Try phrasing it a different way!")
                 
             else:
                 # Standard Text Chat Logic with Groq
