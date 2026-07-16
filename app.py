@@ -4,7 +4,6 @@ import base64
 import urllib.parse
 import re
 import requests
-from duckduckgo_search import DDGS
 
 # Fast, clean, full-screen chat layout
 st.set_page_config(page_title="Rival Chatbot", page_icon="💬", layout="centered")
@@ -58,7 +57,7 @@ st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>💬 Rival Cha
 
 # --- IN-MEMORY CHAT HISTORY ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Hey! Ask me to write, draw an image, or play a video."}]
+    st.session_state.messages = [{"role": "assistant", "content": "Hey! Ask me to write, draw an image, or look up cybersecurity news."}]
 
 # Render current session messages
 for msg in st.session_state.messages:
@@ -73,16 +72,13 @@ for msg in st.session_state.messages:
 if prompt := st.chat_input("Talk, draw, or play a video..."):
     prompt = prompt.strip()
     if prompt:
-        # Show user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
 
-        # Generate Assistant response
         with st.chat_message("assistant"):
             placeholder = st.empty()
             
-            # Keywords checks
             image_keywords = ["generate image", "draw", "paint", "create an image of", "make a picture of"]
             is_image = any(kw in prompt.lower() for kw in image_keywords)
             
@@ -136,28 +132,38 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                 except Exception as e:
                     placeholder.error(f"Error fetching video: {e}")
             
-            # 3. Standard Text / Search response (With Bulletproof Fallback)
+            # 3. Text & Real-Time Tavily Web Search
             else:
                 try:
-                    placeholder.info("Searching the web... 🌐")
+                    placeholder.info("Searching the live web... 🌐")
                     context = ""
-                    try:
-                        # Modified DDGS call to use standard text search directly with a timeout
-                        results = DDGS().text(prompt, max_results=3)
-                        if results:
-                            for r in results:
-                                context += f"Source: {r.get('href')}\nSnippet: {r.get('body')}\n\n"
-                    except Exception as ddg_err:
-                        # Silently log the issue but do NOT crash. Let Groq reply anyway!
-                        context = ""
                     
-                    system = "You are a helpful assistant."
+                    # Fetching Tavily API Key from secrets
+                    tavily_key = st.secrets.get("TAVILY_API_KEY")
+                    
+                    if tavily_key:
+                        try:
+                            # Standard Tavily Search API payload
+                            payload = {
+                                "api_key": tavily_key,
+                                "query": prompt,
+                                "search_depth": "basic",
+                                "include_answer": False,
+                                "max_results": 4
+                            }
+                            search_res = requests.post("https://api.tavily.com/search", json=payload, timeout=8).json()
+                            results = search_res.get("results", [])
+                            for r in results:
+                                context += f"Source: {r.get('url')}\nTitle: {r.get('title')}\nContent: {r.get('content')}\n\n"
+                        except Exception as search_err:
+                            context = ""
+                    
+                    system = "You are a highly capable AI assistant specializing in real-time information retrieval."
                     if context:
-                        system += f"\n\nHere is some real-time web search context to help you answer:\n{context}"
+                        system += f"\n\nHere is fresh search data to ground your answer. Use this to help the user with their question:\n{context}"
                     else:
-                        system += "\n\n(Note: Web search was temporarily blocked by the search engine, so please answer to the best of your general knowledge.)"
+                        system += "\n\n(Note: Web search is currently unavailable. Answer to the best of your general knowledge.)"
                         
-                    # Build history payload
                     clean_hist = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
                     full_messages = [{"role": "system", "content": system}] + clean_hist
                     
