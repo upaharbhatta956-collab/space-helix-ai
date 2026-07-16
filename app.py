@@ -2,9 +2,9 @@ import streamlit as st
 from groq import Groq
 import base64
 import urllib.parse
-import urllib.request
 import json
 import re
+import requests  # Clean and handles redirects automatically!
 from duckduckgo_search import DDGS
 
 # Start with the sidebar COLLAPSED on the login screen
@@ -16,26 +16,26 @@ else:
 # Fetch database API url from Streamlit secrets
 API_URL = st.secrets.get("SHEETS_API_URL")
 
-# --- DATABASE HELPER FUNCTIONS (WITH USER-AGENT FIX) ---
+# --- DATABASE HELPER FUNCTIONS (WITH REQUESTS REDIRECT FIX) ---
 def db_request(payload):
     if not API_URL:
         st.error("Missing SHEETS_API_URL in Streamlit secrets!")
         return None
     try:
-        # We spoof a Chrome browser user-agent so Google Sheets doesn't block the connection with a 403!
+        # Spoof a real browser header
         headers = {
-            "Content-Type": "application/json",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        req = urllib.request.Request(
-            API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers
-        )
-        with urllib.request.urlopen(req) as res:
-            return json.loads(res.read().decode("utf-8"))
+        # requests.post automatically handles the 302 redirects from Google Scripts
+        response = requests.post(API_URL, json=payload, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Database error: Received status code {response.status_code}")
+            return None
     except Exception as e:
-        st.error(f"Database error: {e}")
+        st.error(f"Database connection error: {e}")
         return None
 
 def save_chat_history_to_db():
@@ -276,10 +276,10 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                         'Accept-Language': 'en-US,en;q=0.9'
                     }
-                    req = urllib.request.Request(url, headers=headers)
                     
-                    with urllib.request.urlopen(req) as response:
-                        html = response.read().decode('utf-8', errors='ignore')
+                    # We can use requests here too!
+                    response = requests.get(url, headers=headers, timeout=10)
+                    html = response.text
                         
                     video_ids = re.findall(r'"videoId":"([^"]{11})"', html)
                     if not video_ids:
