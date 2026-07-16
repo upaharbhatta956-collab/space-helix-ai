@@ -16,16 +16,21 @@ else:
 # Fetch database API url from Streamlit secrets
 API_URL = st.secrets.get("SHEETS_API_URL")
 
-# --- DATABASE HELPER FUNCTIONS ---
+# --- DATABASE HELPER FUNCTIONS (WITH USER-AGENT FIX) ---
 def db_request(payload):
     if not API_URL:
         st.error("Missing SHEETS_API_URL in Streamlit secrets!")
         return None
     try:
+        # We spoof a Chrome browser user-agent so Google Sheets doesn't block the connection with a 403!
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         req = urllib.request.Request(
             API_URL,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
+            headers=headers
         )
         with urllib.request.urlopen(req) as res:
             return json.loads(res.read().decode("utf-8"))
