@@ -3,8 +3,12 @@ from groq import Groq
 import base64
 import urllib.parse
 
-# Simple browser tab title
-st.set_page_config(page_title="Rival Chatbot", page_icon="💬")
+# 1. Start with the sidebar EXPANDED by default!
+st.set_page_config(
+    page_title="Rival Chatbot", 
+    page_icon="💬", 
+    initial_sidebar_state="expanded"
+)
 
 # --- BACKGROUND IMAGE HELPER ---
 def get_base64_of_bin_file(bin_file):
@@ -44,12 +48,54 @@ except FileNotFoundError:
 # Initialize the Groq client
 client = Groq()
 
-# Initialize session state for messages
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Ready to go. Ask me to generate an image or just chat!"}]
+# --- CHAT HISTORY STORAGE ---
+# 'all_chats' stores previous sessions: { "Chat Name": [messages] }
+if "all_chats" not in st.session_state:
+    st.session_state.all_chats = {
+        "Chat 1": [{"role": "assistant", "content": "Ready to go. Ask me to generate an image or just chat!"}]
+    }
 
-# Render current chat history (including text and any generated images)
-for msg in st.session_state.messages:
+# 'active_chat' tracks which chat name we are currently looking at
+if "active_chat" not in st.session_state:
+    st.session_state.active_chat = "Chat 1"
+
+# --- COLLAPSIBLE SIDEBAR ---
+with st.sidebar:
+    st.title("💬 Chat History")
+    
+    # Button to start a brand-new chat session
+    if st.button("➕ New Chat", use_container_width=True):
+        new_chat_num = len(st.session_state.all_chats) + 1
+        new_chat_name = f"Chat {new_chat_num}"
+        st.session_state.all_chats[new_chat_name] = [{"role": "assistant", "content": "Started a fresh chat! Ready to go."}]
+        st.session_state.active_chat = new_chat_name
+        st.rerun()
+    
+    st.markdown("---")
+    st.write("### Previous Conversations:")
+    
+    # List all saved chats as clickable buttons
+    for chat_name in list(st.session_state.all_chats.keys()):
+        # Highlight the current chat using a visual emoji
+        label = f"✨ {chat_name}" if chat_name == st.session_state.active_chat else f"📁 {chat_name}"
+        
+        if st.button(label, key=f"btn_{chat_name}", use_container_width=True):
+            st.session_state.active_chat = chat_name
+            st.rerun()
+            
+    st.markdown("---")
+    
+    # Danger zone button to wipe everything
+    if st.button("🧹 Wipe All History", use_container_width=True):
+        st.session_state.all_chats = {"Chat 1": [{"role": "assistant", "content": "All history wiped. Fresh start!"}]}
+        st.session_state.active_chat = "Chat 1"
+        st.rerun()
+
+# --- LOAD CURRENT ACTIVE CHAT MESSAGES ---
+current_messages = st.session_state.all_chats[st.session_state.active_chat]
+
+# Render messages from the active session
+for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
         if "image_url" in msg:
@@ -59,8 +105,8 @@ for msg in st.session_state.messages:
 if prompt := st.chat_input("Talk or ask for an image..."):
     prompt = prompt.strip()
     if prompt:
-        # Display and record user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Save user message to active history
+        current_messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
 
@@ -68,50 +114,42 @@ if prompt := st.chat_input("Talk or ask for an image..."):
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             
-            # Check if user is asking for an image
             image_keywords = ["generate image", "draw", "generate an image", "create an image of", "paint", "make a picture of"]
             is_image_request = any(keyword in prompt.lower() for keyword in image_keywords)
             
             if is_image_request:
-                # 1. Let the user know we're rendering it
                 response_placeholder.info("Generating your masterpiece... 🎨")
                 
-                # Clean up prompt to extract just the image description
                 image_prompt = prompt
                 for kw in image_keywords:
                     image_prompt = image_prompt.replace(kw, "")
                 image_prompt = image_prompt.strip()
                 
-                # Fallback if the user just typed "draw" without details
                 if not image_prompt:
                     image_prompt = "a majestic futuristic neon city"
                 
-                # 2. Generate the safe URL-encoded image using the high-quality Flux engine
                 encoded_prompt = urllib.parse.quote(image_prompt)
                 image_url = f"https://image.pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&nologo=true"
                 
-                # 3. Clean up the placeholder and render the image!
                 response_placeholder.empty()
                 st.image(image_url, caption=f'"{image_prompt}"', use_container_width=True)
                 
-                # 4. Save both the bot message and the image to chat history
                 text_response = f"Here is the image I generated for: '{image_prompt}'"
-                st.session_state.messages.append({
+                current_messages.append({
                     "role": "assistant", 
                     "content": text_response,
                     "image_url": image_url
                 })
+                st.rerun()
                 
             else:
-                # Standard Text Chat Logic with Groq
                 try:
-                    # Let Groq know about our image ability in a system prompt!
                     messages_with_system = [
                         {"role": "system", "content": "You are a helpful assistant. If the user wants an image, they can use words like 'draw' or 'generate image' to trigger your image generation tool."}
-                    ] + st.session_state.messages
+                    ] + current_messages
                     
                     completion = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
+                        model="llama-3.3-70b-specdec",
                         messages=messages_with_system,
                         stream=True,
                     )
@@ -122,7 +160,8 @@ if prompt := st.chat_input("Talk or ask for an image..."):
                             full_response += chunk.choices[0].delta.content
                             response_placeholder.write(full_response)
                     
-                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    current_messages.append({"role": "assistant", "content": full_response})
+                    st.rerun()
                     
                 except Exception as e:
                     response_placeholder.error(f"Oops! Something went wrong: {e}")
