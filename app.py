@@ -4,56 +4,48 @@ import base64
 import urllib.parse
 import json
 import re
-import requests  # Clean and handles redirects automatically!
+import requests
 from duckduckgo_search import DDGS
+from streamlit_local_storage import LocalStorage
 
-# Start with the sidebar COLLAPSED on the login screen
+# Initialize local storage helper
+local_storage = LocalStorage()
+
+# UI Config
 if "logged_in_user" not in st.session_state:
     st.set_page_config(page_title="Rival Chatbot", page_icon="🔐", initial_sidebar_state="collapsed")
 else:
     st.set_page_config(page_title="Rival Chatbot", page_icon="💬", initial_sidebar_state="expanded")
 
-# Fetch database API url from Streamlit secrets
-API_URL = st.secrets.get("SHEETS_API_URL")
-
-# --- DATABASE HELPER FUNCTIONS (WITH REQUESTS REDIRECT FIX) ---
-def db_request(payload):
-    if not API_URL:
-        st.error("Missing SHEETS_API_URL in Streamlit secrets!")
-        return None
-    try:
-        # Spoof a real browser header
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# --- AUTO-LOAD CHATS FROM BROWSER STORAGE ---
+# Attempt to load previously saved chats from the browser cache
+if "all_chats" not in st.session_state:
+    saved_chats = local_storage.getItem("rival_chat_history")
+    if saved_chats:
+        try:
+            st.session_state.all_chats = json.loads(saved_chats)
+        except Exception:
+            st.session_state.all_chats = None
+    
+    # Fallback if no saved chats exist yet
+    if not st.session_state.get("all_chats"):
+        st.session_state.all_chats = {
+            "Chat 1": [{"role": "assistant", "content": "Welcome back! This chat is saved directly to your browser."}]
         }
-        # requests.post automatically handles the 302 redirects from Google Scripts
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Database error: Received status code {response.status_code}")
-            return None
-    except Exception as e:
-        st.error(f"Database connection error: {e}")
-        return None
 
-def save_chat_history_to_db():
-    if "logged_in_user" in st.session_state and "all_chats" in st.session_state:
-        db_request({
-            "action": "save",
-            "username": st.session_state.logged_in_user,
-            "history": json.dumps(st.session_state.all_chats)
-        })
+if "active_chat" not in st.session_state:
+    st.session_state.active_chat = list(st.session_state.all_chats.keys())[0]
 
-# --- BACKGROUND IMAGE HELPER ---
-def get_base64_of_bin_file(bin_file):
-    with open(bin_file, 'rb') as f:
-        data = f.read()
-    return base64.b64encode(data).decode()
+# --- SAVE CHATS HELPER ---
+def save_chats_to_browser():
+    if "all_chats" in st.session_state:
+        chats_json = json.dumps(st.session_state.all_chats)
+        local_storage.setItem("rival_chat_history", chats_json)
 
+# --- BACKGROUND STYLE ---
 try:
-    bin_str = get_base64_of_bin_file('background.png')
+    with open('background.png', 'rb') as f:
+        bin_str = base64.b64encode(f.read()).decode()
     page_bg_img = f'''
     <style>
     .stApp {{
@@ -94,71 +86,14 @@ except FileNotFoundError:
     '''
     st.markdown(page_bg_gradient, unsafe_allow_html=True)
 
-# --- USER LOGIN/SIGNUP UI ---
-if "logged_in_user" not in st.session_state:
-    st.markdown("<h1 style='text-align: center;'>🔐 Rival Chat Login</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #888;'>Sign in or create an account to save your chat history forever!</p>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Login")
-        login_user = st.text_input("Username", key="l_user").strip()
-        login_pass = st.text_input("Password", type="password", key="l_pass").strip()
-        if st.button("Sign In", use_container_width=True):
-            if login_user and login_pass:
-                res = db_request({"action": "login", "username": login_user, "password": login_pass})
-                if res and res.get("status") == "success":
-                    st.session_state.logged_in_user = login_user
-                    st.session_state.all_chats = json.loads(res.get("history", "{}"))
-                    if not st.session_state.all_chats:
-                        st.session_state.all_chats = {"Chat 1": [{"role": "assistant", "content": "Welcome back! Ready to chat!"}]}
-                    st.session_state.active_chat = list(st.session_state.all_chats.keys())[0]
-                    st.success(f"Logged in as {login_user}!")
-                    st.rerun()
-                else:
-                    st.error("Invalid Username or Password.")
-            else:
-                st.warning("Please fill out both fields.")
-                
-    with col2:
-        st.subheader("Create Account")
-        reg_user = st.text_input("New Username", key="r_user").strip()
-        reg_pass = st.text_input("New Password", type="password", key="r_pass").strip()
-        if st.button("Sign Up", use_container_width=True):
-            if reg_user and reg_pass:
-                res = db_request({"action": "signup", "username": reg_user, "password": reg_pass})
-                if res and res.get("status") == "success":
-                    st.success("Account created successfully! You can now log in.")
-                elif res and res.get("status") == "exists":
-                    st.error("Username already taken.")
-            else:
-                st.warning("Please fill out both fields.")
-                
-    st.stop()  # Halt execution so they can't access the app without logging in
-
-# --- AFTER LOGIN: MAIN CHAT APP RUNS ---
+# --- CHAT INTERFACE ---
 client = Groq()
 
-if "all_chats" not in st.session_state:
-    st.session_state.all_chats = {
-        "Chat 1": [{"role": "assistant", "content": f"Welcome, {st.session_state.logged_in_user}! Ask me anything."}]
-    }
-
-if "active_chat" not in st.session_state:
-    st.session_state.active_chat = "Chat 1"
-
-# --- COLLAPSIBLE SIDEBAR ---
+# --- SIDEBAR CONTROL panel ---
 with st.sidebar:
     st.title("💬 Chat History")
-    st.write(f"👤 Logged in as: **{st.session_state.logged_in_user}**")
+    st.write("💾 *Saves automatically to your device*")
     
-    if st.button("🚪 Log Out", use_container_width=True):
-        del st.session_state.logged_in_user
-        if "all_chats" in st.session_state:
-            del st.session_state.all_chats
-        st.rerun()
-        
     st.markdown("---")
     
     if st.button("➕ New Chat", use_container_width=True):
@@ -166,7 +101,7 @@ with st.sidebar:
         new_chat_name = f"Chat {new_chat_num}"
         st.session_state.all_chats[new_chat_name] = [{"role": "assistant", "content": "Fresh chat! Ask away."}]
         st.session_state.active_chat = new_chat_name
-        save_chat_history_to_db()
+        save_chats_to_browser()
         st.rerun()
     
     st.markdown("---")
@@ -181,7 +116,7 @@ with st.sidebar:
     if new_title and new_title != st.session_state.active_chat:
         st.session_state.all_chats[new_title] = st.session_state.all_chats.pop(st.session_state.active_chat)
         st.session_state.active_chat = new_title
-        save_chat_history_to_db()
+        save_chats_to_browser()
         st.rerun()
         
     st.markdown("---")
@@ -197,13 +132,13 @@ with st.sidebar:
     if st.button("🧹 Wipe All History", use_container_width=True):
         st.session_state.all_chats = {"Chat 1": [{"role": "assistant", "content": "All history wiped. Fresh start!"}]}
         st.session_state.active_chat = "Chat 1"
-        save_chat_history_to_db()
+        save_chats_to_browser()
         st.rerun()
 
-# --- LOAD CURRENT ACTIVE CHAT MESSAGES ---
+# --- MAIN CHAT LAYOUT ---
 current_messages = st.session_state.all_chats[st.session_state.active_chat]
 
-# Render messages
+# Render active conversation
 for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
@@ -212,7 +147,7 @@ for msg in current_messages:
         if "video_url" in msg:
             st.video(msg["video_url"])
 
-# Watch for user input
+# Capture User Message
 if prompt := st.chat_input("Talk, draw, or play a video..."):
     prompt = prompt.strip()
     if prompt:
@@ -220,15 +155,13 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
         with st.chat_message("user"):
             st.write(prompt)
 
-        # Get response
+        # Generate Bot Response
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             
-            # 1. CHECK FOR IMAGE REQUESTS
             image_keywords = ["generate image", "draw", "generate an image", "create an image of", "paint", "make a picture of"]
             is_image_request = any(keyword in prompt.lower() for keyword in image_keywords)
             
-            # 2. CHECK FOR YOUTUBE REQUESTS
             video_keywords = ["play", "watch", "youtube", "listen to", "search youtube for"]
             is_video_request = any(keyword in prompt.lower() for keyword in video_keywords)
             
@@ -254,7 +187,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     "content": f"Here is the image I generated for: '{image_prompt}'",
                     "image_url": image_url
                 })
-                save_chat_history_to_db()
+                save_chats_to_browser()
                 st.rerun()
                 
             elif is_video_request:
@@ -277,7 +210,6 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                         'Accept-Language': 'en-US,en;q=0.9'
                     }
                     
-                    # We can use requests here too!
                     response = requests.get(url, headers=headers, timeout=10)
                     html = response.text
                         
@@ -298,7 +230,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                             "content": f"Found a video for: **{search_query}** 🎥",
                             "video_url": video_url
                         })
-                        save_chat_history_to_db()
+                        save_chats_to_browser()
                         st.rerun()
                     else:
                         response_placeholder.error("Couldn't find any videos for that search. Try phrasing it differently!")
@@ -306,7 +238,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     response_placeholder.error(f"Failed to find video. Error: {e}")
                 
             else:
-                # Standard Text Chat with Live Web Search
+                # Text Response & Web Search
                 try:
                     response_placeholder.info("Searching the live web for facts... 🌐")
                     
@@ -315,6 +247,10 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                         with DDGS() as ddgs:
                             search_results = ddgs.text(prompt, max_results=3)
                             if search_results:
+                                {
+                                    "user": prompt,
+                                    "results": [r.get('body') for r in search_results]
+                                }
                                 for r in search_results:
                                     web_context += f"Source URL: {r.get('href')}\nTitle: {r.get('title')}\nSnippet: {r.get('body')}\n\n"
                     except Exception:
@@ -330,7 +266,6 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                         system_prompt += "\nNo live web search results were found."
 
                     clean_messages = [{"role": msg["role"], "content": msg["content"]} for msg in current_messages]
-
                     messages_with_system = [{"role": "system", "content": system_prompt}] + clean_messages
                     
                     response_placeholder.empty()
@@ -348,7 +283,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                             response_placeholder.write(full_response)
                     
                     current_messages.append({"role": "assistant", "content": full_response})
-                    save_chat_history_to_db()
+                    save_chats_to_browser()
                     st.rerun()
                     
                 except Exception as e:
