@@ -16,26 +16,32 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# Watch for user input
+# Watch for user input (strip spaces to prevent empty submissions)
 if prompt := st.chat_input("Talk away..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.write(prompt)
+    prompt = prompt.strip()
+    if prompt: # Only send if the message isn't empty
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.write(prompt)
 
-    # Fetch response from Groq
-    with st.chat_message("assistant"):
-        response_placeholder = st.empty()
-        
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-specdec",
-            messages=st.session_state.messages,
-            stream=True,
-        )
-        
-        full_response = ""
-        for chunk in completion:
-            if chunk.choices[0].delta.content:
-                full_response += chunk.choices[0].delta.content
-                response_placeholder.write(full_response)
-        
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+        # Fetch response from Groq
+        with st.chat_message("assistant"):
+            response_placeholder = st.empty()
+            
+            try:
+                completion = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",  # Switched to the highly-stable versatile model
+                    messages=st.session_state.messages,
+                    stream=True,
+                )
+                
+                full_response = ""
+                for chunk in completion:
+                    if chunk.choices[0].delta.content:
+                        full_response += chunk.choices[0].delta.content
+                        response_placeholder.write(full_response)
+                
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
+            except Exception as e:
+                response_placeholder.error(f"Oops! Something went wrong: {e}")
