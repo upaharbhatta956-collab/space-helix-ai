@@ -3,7 +3,7 @@ from groq import Groq
 import base64
 import urllib.parse
 
-# 1. Start with the sidebar EXPANDED by default!
+# Start with the sidebar EXPANDED by default!
 st.set_page_config(
     page_title="Rival Chatbot", 
     page_icon="💬", 
@@ -72,17 +72,58 @@ with st.sidebar:
         st.rerun()
     
     st.markdown("---")
+    
+    # 1. NEW: CUSTOM CHAT RENAME INPUT
+    st.write("### ✏️ Rename Active Chat")
+    # Text input initialized with the current active chat's name
+    new_title = st.text_input(
+        "Type a new name and hit Enter:", 
+        value=st.session_state.active_chat,
+        key="rename_input"
+    ).strip()
+    
+    # If the user changed the text and it's not empty, rename it in memory!
+    if new_title and new_title != st.session_state.active_chat:
+        # Transfer the messages to the new key name
+        st.session_state.all_chats[new_title] = st.session_state.all_chats.pop(st.session_state.active_chat)
+        st.session_state.active_chat = new_title
+        st.rerun()
+        
+    st.markdown("---")
     st.write("### Previous Conversations:")
     
     # List all saved chats as clickable buttons
     for chat_name in list(st.session_state.all_chats.keys()):
-        # Highlight the current chat using a visual emoji
+        # Highlight the current active chat
         label = f"✨ {chat_name}" if chat_name == st.session_state.active_chat else f"📁 {chat_name}"
         
         if st.button(label, key=f"btn_{chat_name}", use_container_width=True):
             st.session_state.active_chat = chat_name
             st.rerun()
             
+    st.markdown("---")
+    
+    # 2. NEW: CODE & CHAT EXPORTER BUTTON
+    st.write("### 💾 Export Chat")
+    
+    # Compile all current messages into a single text format
+    chat_export_text = ""
+    for msg in st.session_state.all_chats[st.session_state.active_chat]:
+        role_label = "Bot" if msg["role"] == "assistant" else "You"
+        chat_export_text += f"[{role_label}]: {msg['content']}\n"
+        if "image_url" in msg:
+            chat_export_text += f"[Generated Image URL]: {msg['image_url']}\n"
+        chat_export_text += "-"*40 + "\n"
+        
+    # Standard Streamlit download button
+    st.download_button(
+        label="📥 Download This Chat (.txt)",
+        data=chat_export_text,
+        file_name=f"{st.session_state.active_chat.lower().replace(' ', '_')}_history.txt",
+        mime="text/plain",
+        use_container_width=True
+    )
+    
     st.markdown("---")
     
     # Danger zone button to wipe everything
