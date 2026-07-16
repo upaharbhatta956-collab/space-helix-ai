@@ -5,44 +5,75 @@ import urllib.parse
 import json
 import re
 import requests
+import sqlite3
 from duckduckgo_search import DDGS
-from streamlit_local_storage import LocalStorage
 
-# Initialize local storage helper
-local_storage = LocalStorage()
-
-# UI Config
+# Start with sidebar COLLAPSED on the login screen
 if "logged_in_user" not in st.session_state:
     st.set_page_config(page_title="Rival Chatbot", page_icon="🔐", initial_sidebar_state="collapsed")
 else:
     st.set_page_config(page_title="Rival Chatbot", page_icon="💬", initial_sidebar_state="expanded")
 
-# --- AUTO-LOAD CHATS FROM BROWSER STORAGE ---
-# Attempt to load previously saved chats from the browser cache
-if "all_chats" not in st.session_state:
-    saved_chats = local_storage.getItem("rival_chat_history")
-    if saved_chats:
-        try:
-            st.session_state.all_chats = json.loads(saved_chats)
-        except Exception:
-            st.session_state.all_chats = None
-    
-    # Fallback if no saved chats exist yet
-    if not st.session_state.get("all_chats"):
-        st.session_state.all_chats = {
-            "Chat 1": [{"role": "assistant", "content": "Welcome back! This chat is saved directly to your browser."}]
-        }
+# --- SQLITE DATABASE SETUP & HELPER FUNCTIONS ---
+def get_db_connection():
+    conn = sqlite3.connect("chats.db", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-if "active_chat" not in st.session_state:
-    st.session_state.active_chat = list(st.session_state.all_chats.keys())[0]
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Create table for users & their history if it doesn't exist
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT,
+            history TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-# --- SAVE CHATS HELPER ---
-def save_chats_to_browser():
-    if "all_chats" in st.session_state:
-        chats_json = json.dumps(st.session_state.all_chats)
-        local_storage.setItem("rival_chat_history", chats_json)
+# Initialize database right away
+init_db()
 
-# --- BACKGROUND STYLE ---
+def db_login(username, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+    user = cursor.fetchone()
+    conn.close()
+    if user:
+        return {"status": "success", "history": user["history"]}
+    return {"status": "fail"}
+
+def db_signup(username, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Default starting history is empty json
+        empty_history = json.dumps({
+            "Chat 1": [{"role": "assistant", "content": "Welcome to your new account! Ready to chat."}]
+        })
+        cursor.execute("INSERT INTO users (username, password, history) VALUES (?, ?, ?)", (username, password, empty_history))
+        conn.commit()
+        status = "success"
+    except sqlite3.IntegrityError:
+        status = "exists"
+    finally:
+        conn.close()
+    return {"status": status}
+
+def save_chat_history_to_db():
+    if "logged_in_user" in st.session_state and "all_chats" in st.session_state:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        history_json = json.dumps(st.session_state.all_chats)
+        cursor.execute("UPDATE users SET history = ? WHERE username = ?", (history_json, st.session_state.logged_in_user))
+        conn.commit()
+        conn.close()
+
+# --- BACKGROUND IMAGE HELPER ---
 try:
     with open('background.png', 'rb') as f:
         bin_str = base64.b64encode(f.read()).decode()
@@ -86,14 +117,69 @@ except FileNotFoundError:
     '''
     st.markdown(page_bg_gradient, unsafe_allow_html=True)
 
-# --- CHAT INTERFACE ---
+# --- USER LOGIN/SIGNUP UI ---
+if "logged_in_user" not in st.session_state:
+    st.markdown("<h1 style='text-align: center;'>🔐 Rival Chat Login</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #888;'>Sign in or create a local account instantly.</p>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("Login")
+        login_user = st.text_input("Username", key="l_user").strip()
+        login_pass = st.text_input("Password", type="password", key="l_pass").strip()
+        if st.button("Sign In", use_container_width=True):
+            if login_user and login_pass:
+                res = db_login(login_user, login_pass)
+                if res.get("status") == "success":
+                    st.session_state.logged_in_user = login_user
+                    st.session_state.all_chats = json.loads(res.get("history", "{}"))
+                    st.session_state.active_chat = list(st.session_state.all_chats.keys())[0]
+                    st.success(f"Logged in as {login_user}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid Username or Password.")
+            else:
+                st.warning("Please fill out both fields.")
+                
+    with col2:
+        st.subheader("Create Account")
+        reg_user = st.text_input("New Username", key="r_user").strip()
+        reg_pass = st.text_input("New Password", type="password", key="r_pass").strip()
+        if st.button("Sign Up", use_container_width=True):
+            if reg_user and reg_pass:
+                res = db_signup(reg_user, reg_pass)
+                if res.get("status") == "success":
+                    st.success("Account created successfully! You can now log in.")
+                elif res.get("status") == "exists":
+                    st.error("Username already taken.")
+            else:
+                st.warning("Please fill out both fields.")
+                
+    st.stop()  # Stop page execution until logged in
+
+# --- MAIN CHAT APP (RUNS AFTER SUCCESSFUL LOGIN) ---
 client = Groq()
 
-# --- SIDEBAR CONTROL panel ---
+if "all_chats" not in st.session_state:
+    st.session_state.all_chats = {
+        "Chat 1": [{"role": "assistant", "content": f"Welcome, {st.session_state.logged_in_user}! Ask me anything."}]
+    }
+
+if "active_chat" not in st.session_state:
+    st.session_state.active_chat = list(st.session_state.all_chats.keys())[0]
+
+# --- SIDEBAR CONTROLS ---
 with st.sidebar:
     st.title("💬 Chat History")
-    st.write("💾 *Saves automatically to your device*")
+    st.write(f"👤 Logged in as: **{st.session_state.logged_in_user}**")
     
+    if st.button("🚪 Log Out", use_container_width=True):
+        del st.session_state.logged_in_user
+        if "all_chats" in st.session_state:
+            del st.session_state.all_chats
+        st.rerun()
+        
     st.markdown("---")
     
     if st.button("➕ New Chat", use_container_width=True):
@@ -101,7 +187,7 @@ with st.sidebar:
         new_chat_name = f"Chat {new_chat_num}"
         st.session_state.all_chats[new_chat_name] = [{"role": "assistant", "content": "Fresh chat! Ask away."}]
         st.session_state.active_chat = new_chat_name
-        save_chats_to_browser()
+        save_chat_history_to_db()
         st.rerun()
     
     st.markdown("---")
@@ -116,7 +202,7 @@ with st.sidebar:
     if new_title and new_title != st.session_state.active_chat:
         st.session_state.all_chats[new_title] = st.session_state.all_chats.pop(st.session_state.active_chat)
         st.session_state.active_chat = new_title
-        save_chats_to_browser()
+        save_chat_history_to_db()
         st.rerun()
         
     st.markdown("---")
@@ -129,16 +215,16 @@ with st.sidebar:
             st.rerun()
             
     st.markdown("---")
+    # --- WIPE HISTORY (FIXED) ---
     if st.button("🧹 Wipe All History", use_container_width=True):
         st.session_state.all_chats = {"Chat 1": [{"role": "assistant", "content": "All history wiped. Fresh start!"}]}
         st.session_state.active_chat = "Chat 1"
-        save_chats_to_browser()
+        save_chat_history_to_db()
         st.rerun()
 
-# --- MAIN CHAT LAYOUT ---
+# --- RENDER CHAT INTERFACE ---
 current_messages = st.session_state.all_chats[st.session_state.active_chat]
 
-# Render active conversation
 for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
@@ -147,7 +233,7 @@ for msg in current_messages:
         if "video_url" in msg:
             st.video(msg["video_url"])
 
-# Capture User Message
+# Capture user prompt
 if prompt := st.chat_input("Talk, draw, or play a video..."):
     prompt = prompt.strip()
     if prompt:
@@ -155,10 +241,11 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
         with st.chat_message("user"):
             st.write(prompt)
 
-        # Generate Bot Response
+        # Get response
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             
+            # Keywords checks
             image_keywords = ["generate image", "draw", "generate an image", "create an image of", "paint", "make a picture of"]
             is_image_request = any(keyword in prompt.lower() for keyword in image_keywords)
             
@@ -167,14 +254,10 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
             
             if is_image_request:
                 response_placeholder.info("Generating your masterpiece... 🎨")
-                
                 image_prompt = prompt
                 for kw in image_keywords:
                     image_prompt = image_prompt.replace(kw, "")
-                image_prompt = image_prompt.strip()
-                
-                if not image_prompt:
-                    image_prompt = "a majestic futuristic neon city"
+                image_prompt = image_prompt.strip() or "a majestic futuristic neon city"
                 
                 encoded_prompt = urllib.parse.quote(image_prompt)
                 image_url = f"https://image.pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&nologo=true"
@@ -187,41 +270,28 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     "content": f"Here is the image I generated for: '{image_prompt}'",
                     "image_url": image_url
                 })
-                save_chats_to_browser()
+                save_chat_history_to_db()
                 st.rerun()
                 
             elif is_video_request:
                 response_placeholder.info("Searching YouTube directly... 🔍")
-                
                 search_query = prompt
                 for kw in video_keywords:
                     search_query = search_query.replace(kw, "")
-                search_query = search_query.strip()
-                
-                if not search_query:
-                    search_query = "never gonna give you up"
+                search_query = search_query.strip() or "never gonna give you up"
                 
                 try:
                     encoded_search = urllib.parse.quote(search_query)
                     url = f"https://www.youtube.com/results?search_query={encoded_search}"
-                    
                     headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept-Language': 'en-US,en;q=0.9'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                     }
-                    
                     response = requests.get(url, headers=headers, timeout=10)
                     html = response.text
-                        
-                    video_ids = re.findall(r'"videoId":"([^"]{11})"', html)
-                    if not video_ids:
-                        video_ids = re.findall(r'/watch\?v=([a-zA-Z0-9_-]{11})', html)
+                    video_ids = re.findall(r'"videoId":"([^"]{11})"', html) or re.findall(r'/watch\?v=([a-zA-Z0-9_-]{11})', html)
                     
                     if video_ids:
-                        unique_ids = list(dict.fromkeys(video_ids))
-                        video_id = unique_ids[0]
-                        video_url = f"https://www.youtube.com/watch?v={video_id}"
-                        
+                        video_url = f"https://www.youtube.com/watch?v={list(dict.fromkeys(video_ids))[0]}"
                         response_placeholder.empty()
                         st.video(video_url)
                         
@@ -230,46 +300,35 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                             "content": f"Found a video for: **{search_query}** 🎥",
                             "video_url": video_url
                         })
-                        save_chats_to_browser()
+                        save_chat_history_to_db()
                         st.rerun()
                     else:
-                        response_placeholder.error("Couldn't find any videos for that search. Try phrasing it differently!")
+                        response_placeholder.error("Couldn't find any videos for that search.")
                 except Exception as e:
-                    response_placeholder.error(f"Failed to find video. Error: {e}")
+                    response_placeholder.error(f"Failed to find video: {e}")
                 
             else:
-                # Text Response & Web Search
+                # Text Chat
                 try:
                     response_placeholder.info("Searching the live web for facts... 🌐")
-                    
                     web_context = ""
                     try:
                         with DDGS() as ddgs:
                             search_results = ddgs.text(prompt, max_results=3)
                             if search_results:
-                                {
-                                    "user": prompt,
-                                    "results": [r.get('body') for r in search_results]
-                                }
                                 for r in search_results:
                                     web_context += f"Source URL: {r.get('href')}\nTitle: {r.get('title')}\nSnippet: {r.get('body')}\n\n"
                     except Exception:
                         web_context = ""
                     
-                    system_prompt = (
-                        "You are a helpful, extremely fast, and highly accurate assistant. "
-                        "You have access to live web results to answer the user's prompt. "
-                    )
+                    system_prompt = "You are a helpful assistant with access to web results.\n"
                     if web_context:
-                        system_prompt += f"\nHere is the live web search context related to the user's question:\n\n{web_context}"
-                    else:
-                        system_prompt += "\nNo live web search results were found."
-
+                        system_prompt += f"\nWeb Context:\n{web_context}"
+                    
                     clean_messages = [{"role": msg["role"], "content": msg["content"]} for msg in current_messages]
                     messages_with_system = [{"role": "system", "content": system_prompt}] + clean_messages
                     
                     response_placeholder.empty()
-                    
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=messages_with_system,
@@ -283,7 +342,7 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                             response_placeholder.write(full_response)
                     
                     current_messages.append({"role": "assistant", "content": full_response})
-                    save_chats_to_browser()
+                    save_chat_history_to_db()
                     st.rerun()
                     
                 except Exception as e:
