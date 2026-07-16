@@ -2,3 +2,4 @@ streamlit
 groq
 duckduckgo-search
 requests
+streamlit-local-storage
