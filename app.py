@@ -7,7 +7,7 @@ import requests
 from duckduckgo_search import DDGS
 
 # Fast, clean, full-screen chat layout
-st.set_page_config(page_title="Rival Chatbot", page_icon="💬", layout="centered")
+st.set_page_config(page_title="SparkHelix AI", page_icon="💬", layout="centered")
 
 # --- BACKGROUND STYLE ---
 try:
