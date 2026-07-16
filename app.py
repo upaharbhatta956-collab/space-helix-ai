@@ -4,6 +4,7 @@ import base64
 import urllib.parse
 import urllib.request
 import re
+from duckduckgo_search import DDGS  # New Free Web Search Library
 
 # Start with the sidebar EXPANDED by default!
 st.set_page_config(
@@ -53,7 +54,7 @@ client = Groq()
 # --- CHAT HISTORY STORAGE ---
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = {
-        "Chat 1": [{"role": "assistant", "content": "Ready to go. Ask me to generate an image, play a YouTube video, or just chat!"}]
+        "Chat 1": [{"role": "assistant", "content": "Ready to go! Now with real-time Google/DuckDuckGo web searching. Ask me anything!"}]
     }
 
 if "active_chat" not in st.session_state:
@@ -188,7 +189,6 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     search_query = "never gonna give you up"
                 
                 try:
-                    # Query YouTube directly
                     encoded_search = urllib.parse.quote(search_query)
                     url = f"https://www.youtube.com/results?search_query={encoded_search}"
                     
@@ -201,7 +201,6 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     with urllib.request.urlopen(req) as response:
                         html = response.read().decode('utf-8', errors='ignore')
                         
-                    # Extract video IDs
                     video_ids = re.findall(r'"videoId":"([^"]{11})"', html)
                     
                     if not video_ids:
@@ -227,9 +226,36 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                     response_placeholder.error(f"Failed to find video. Error: {e}")
                 
             else:
-                # Standard Text Chat Logic with Groq
+                # Standard Text Chat with Live DuckDuckGo Web Search Integration!
                 try:
-                    # CRITICAL FIX: Clean the messages so Groq doesn't see 'video_url' or 'image_url' keys!
+                    response_placeholder.info("Searching the live web for facts... 🌐")
+                    
+                    # 1. Query DuckDuckGo for context
+                    web_context = ""
+                    try:
+                        with DDGS() as ddgs:
+                            search_results = ddgs.text(prompt, max_results=3)
+                            if search_results:
+                                for r in search_results:
+                                    web_context += f"Source URL: {r.get('href')}\nTitle: {r.get('title')}\nSnippet: {r.get('body')}\n\n"
+                    except Exception as search_err:
+                        # Fallback silently if search fails and proceed without web context
+                        web_context = ""
+                    
+                    # 2. Build system instructions with the live search context injected
+                    system_prompt = (
+                        "You are a helpful, extremely fast, and highly accurate assistant. "
+                        "You have access to live web results to answer the user's prompt. "
+                    )
+                    if web_context:
+                        system_prompt += (
+                            f"\nHere is the live web search context related to the user's question. "
+                            f"Prioritize using this information to keep your answer factually correct:\n\n{web_context}"
+                        )
+                    else:
+                        system_prompt += "\nNo live web search results were found, answer to the best of your general knowledge."
+
+                    # Clean history so Groq api doesn't crash on custom image/video keys
                     clean_messages = []
                     for msg in current_messages:
                         clean_messages.append({
@@ -238,9 +264,12 @@ if prompt := st.chat_input("Talk, draw, or play a video..."):
                         })
 
                     messages_with_system = [
-                        {"role": "system", "content": "You are a helpful assistant. If the user wants to play a video or watch something, tell them you can search YouTube and play it for them!"}
+                        {"role": "system", "content": system_prompt}
                     ] + clean_messages
                     
+                    response_placeholder.empty()
+                    
+                    # 3. Request completion with streamed response
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=messages_with_system,
