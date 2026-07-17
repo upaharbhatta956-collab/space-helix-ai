@@ -53,7 +53,7 @@ except FileNotFoundError:
     st.markdown(page_bg_gradient, unsafe_allow_html=True)
 
 # Title
-st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>💬 Rival Chat</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>SpaceHelix AI</h1>", unsafe_allow_html=True)
 
 # --- IN-MEMORY CHAT HISTORY ---
 if "messages" not in st.session_state:
