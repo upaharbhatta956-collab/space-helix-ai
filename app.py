@@ -57,7 +57,7 @@ st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>💬 Rival Cha
 
 # --- IN-MEMORY CHAT HISTORY ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Hey! Ask me to write, draw an image, or look up cybersecurity news."}]
+    st.session_state.messages = [{"role": "assistant", "content": "Ready when you are."}]
 
 # Render current session messages
 for msg in st.session_state.messages:
